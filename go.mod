@@ -1,4 +1,4 @@
-module github.com/spf13/viper
+module github.com/beijibeijing/viper
 
 go 1.12
 
@@ -21,6 +21,7 @@ require (
 	github.com/mitchellh/mapstructure v1.3.3
 	github.com/pelletier/go-toml v1.2.0
 	github.com/prometheus/client_golang v0.9.3 // indirect
+	github.com/radovskyb/watcher v1.0.7 // indirect
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/afero v1.1.2
