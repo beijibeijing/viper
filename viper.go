@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,7 @@ import (
 	"github.com/magiconair/properties"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pelletier/go-toml"
+	"github.com/radovskyb/watcher"
 	"github.com/spf13/afero"
 	"github.com/spf13/cast"
 	jww "github.com/spf13/jwalterweatherman"
@@ -214,7 +216,8 @@ type Viper struct {
 	// This will only be used if the configuration read is a properties file.
 	properties *properties.Properties
 
-	onConfigChange func(fsnotify.Event)
+	onConfigChange        func(fsnotify.Event)
+	onWatcherConfigChange func(watcher.Event)
 }
 
 // New returns an initialized Viper instance.
@@ -405,6 +408,70 @@ func (v *Viper) WatchConfig() {
 		eventsWG.Wait() // now, wait for event loop to end in this go-routine...
 	}()
 	initWG.Wait() // make sure that the go routine above fully ended before returning
+}
+
+func OnWatcherConfigChange(run func(in watcher.Event)) { v.OnWatcherConfigChange(run) }
+func (v *Viper) OnWatcherConfigChange(run func(in watcher.Event)) {
+	v.onWatcherConfigChange = run
+}
+func WatcherConfig() { v.WatcherConfig() }
+
+func (v *Viper) WatcherConfig() {
+	go func() {
+		filename, err := v.getConfigFile()
+		if err != nil {
+			log.Printf("error: %v\n", err)
+			return
+		}
+
+		configFile := filepath.Clean(filename)
+		configDir, _ := filepath.Split(configFile)
+
+		w := watcher.New()
+		//w.SetMaxEvents(1)
+		// Only notify rename and move events.
+		w.FilterOps(watcher.Write)
+		r := regexp.MustCompile("config.yaml")
+		w.AddFilterHook(watcher.RegexFilterHook(r, false))
+		defer w.Close()
+
+		go func() {
+			for {
+				select {
+				case event, ok := <-w.Event:
+					if !ok { // 'Events' channel is closed
+						return
+					}
+					err := v.ReadInConfig()
+					if err != nil {
+						log.Printf("error reading config file: %v\n", err)
+					}
+					if v.onConfigChange != nil {
+						v.onWatcherConfigChange(event)
+					}
+				case err, ok := <-w.Error:
+					if ok { // 'Errors' channel is not closed
+						log.Printf("watcher error: %v\n", err)
+					}
+					return
+				case <-w.Closed:
+					log.Println("w.Closed:")
+					return
+				}
+			}
+		}()
+		w.Add(configDir)
+		for path, f := range w.WatchedFiles() {
+			fmt.Printf("%s: %s\n", path, f.Name())
+		}
+		fmt.Println()
+		if err := w.Start(time.Millisecond * 100); err != nil {
+			log.Println("w.Start:", err.Error())
+			log.Fatalln(err)
+			return
+		}
+
+	}()
 }
 
 // SetConfigFile explicitly defines the path, name and extension of the config file.
